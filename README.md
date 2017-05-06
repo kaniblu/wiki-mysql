@@ -1,4 +1,4 @@
-# Wikipedia Mysql Database Storing Script
+# A Script for Storing Wikipedia Dump to MySQL DB
 
 This script creates a clean mysql database of wikipedia articles fresh from
 the wikidump repo. It can be run on both Python 2 and 3.
