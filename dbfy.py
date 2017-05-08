@@ -126,42 +126,35 @@ def dbfy(path, db, fltr):
 
             body = fltr(body)
 
-            try:
-                with db.cursor() as c:
-                    c.execute("insert into bodies (id, body) value (NULL, %s);",
-                              [body])
-                    c.execute("select last_insert_id();")
+            bid = db.insert("bodies", {
+                "body": body
+            }, auto_column="id")
 
-                    bid = c.fetchone()[0]
+            db.insert("articles", {
+                "title": title,
+                "body": bid,
+                "aid": aid
+            }, auto_column="id")
 
-                    c.execute("insert into articles (id, title, body, aid) "
-                              "value (NULL, %s, %s, %s);",
-                              (title, bid, aid))
+            db.commit()
 
-                    ttl2bid[title] = bid
+    for ttl, rdr_ttl in redirects.items():
+        bid = resolve(ttl, redirects, ttl2bid)
 
-                db.commit()
-            except:
-                continue
+        # Failed to resolve
+        # The page to which `ttl` redirects is probably omitted for
+        # some unknown reason.
+        if bid is None:
+            continue
 
+        aid = redirects_aid[ttl]
 
-    with db.cursor() as c:
-        c.execute("set autocommit=0;")
+        db.insert("articles", {
+            "title": ttl,
+            "body": bid,
+            "aid": aid
+        }, auto_column="id")
 
-        for ttl, rdr_ttl in redirects.items():
-            bid = resolve(ttl, redirects, ttl2bid)
-
-            # Failed to resolve
-            # The page to which `ttl` redirects is probably omitted for
-            # some unknown reason.
-            if bid is None:
-                continue
-
-            aid = redirects_aid[ttl]
-
-            c.execute("insert into articles (id, title, body, aid) "
-                      "value (NULL, %s, %s, %s);",
-                      (ttl, bid, aid))
     db.commit()
 
 def main():
