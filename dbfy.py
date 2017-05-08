@@ -4,8 +4,8 @@ from __future__ import unicode_literals
 
 import re
 import os
-import shutil
 import tempfile
+import multiprocessing.pool as mp
 import six.moves.urllib.request as urllib
 
 import bz2
@@ -30,6 +30,7 @@ def range_str(txt):
 
     return str2int(l), str2int(r)
 
+
 def create_parser():
     parser = argparse.ArgParser()
     parser.add("--src", default="https://dumps.wikimedia.org/enwiki/latest/"
@@ -38,6 +39,7 @@ def create_parser():
                     "to specify a local file by using 'file' scheme. ")
     parser.add("--silent", "-y", default=False, action="store_true",
                help="Disable all prompts.")
+    parser.add("--n_processes", type=int, default=4)
 
     g = parser.add_argument_group("Database Settings")
     g.add("--host", default="localhost", type=str)
@@ -64,6 +66,7 @@ def create_parser():
 
     return parser
 
+
 def check_url(url):
     try:
         filename = os.path.split(url)[-1]
@@ -75,6 +78,7 @@ def check_url(url):
         return False
     finally:
         return True
+
 
 def download_dump(src):
     if src.startswith("file"):
@@ -91,52 +95,81 @@ def download_dump(src):
 
     return dl_path, should_remove
 
+
 def cleanup(dl_path, should_remove):
     if should_remove and os.path.exists(dl_path):
         os.remove(dl_path)
 
+
 REDIRECT_PAT = re.compile(r"\#REDIRECT \[\[([^\]]*)\]\]")
+
 
 def resolve(ttl, redirects, ttl2bid):
     if ttl in ttl2bid:
-        return ttl2bid
+        return ttl2bid[ttl]
 
     if ttl in redirects:
         return resolve(redirects[ttl], redirects, ttl2bid)
 
     return None
 
-def dbfy(path, db, fltr):
+
+def _process(x):
+    global fltr, db
+
+    title, body, aid = x
+
+    aid = int(aid)
+    match = REDIRECT_PAT.match(body)
+
+    if match:
+        rdr_ttl = match.group(1)
+
+        return title, rdr_ttl, aid
+
+    body = fltr(body)
+
+    bid = db.insert("bodies", {
+        "body": body
+    }, auto_column="id")
+
+    db.insert("articles", {
+        "title": title,
+        "body": bid,
+        "aid": aid
+    }, auto_column="id")
+
+    db.commit()
+
+    return title, bid
+
+
+def dbfy(path, db_init, fltr_init, n_processes):
+    db = db_init()
     redirects = {}
     redirects_aid = {}
     ttl2bid = {}
 
+    def _pool_init(dbi, fli):
+
+        global db, fltr
+        db = dbi()
+        fltr = fli()
+
+    pool = mp.Pool(n_processes, _pool_init, (db_init, fltr_init))
+
     with bz2.BZ2File(path, "r") as f:
-        it = gensim.corpora.wikicorpus.extract_pages(f, ("0", ))
+        it = gensim.corpora.wikicorpus.extract_pages(f, ("0",))
 
-        for i, (title, body, aid) in tqdm.tqdm(enumerate(it)):
-            aid = int(aid)
-            match = REDIRECT_PAT.match(body)
-
-            if match:
-                rdr_ttl = match.group(1)
-                redirects[title] = rdr_ttl
-                redirects_aid[title] = aid
-                continue
-
-            body = fltr(body)
-
-            bid = db.insert("bodies", {
-                "body": body
-            }, auto_column="id")
-
-            db.insert("articles", {
-                "title": title,
-                "body": bid,
-                "aid": aid
-            }, auto_column="id")
-
-            db.commit()
+        for group in tqdm.tqdm(gensim.utils.chunkize(it, 40 * n_processes)):
+            for x in pool.imap(_process, group):
+                if len(x) == 3:
+                    ttl, rdr_ttl, aid = x
+                    redirects[ttl] = rdr_ttl
+                    redirects_aid[ttl] = aid
+                elif len(x) == 2:
+                    ttl, bid = x
+                    ttl2bid[ttl] = bid
 
     for ttl, rdr_ttl in redirects.items():
         bid = resolve(ttl, redirects, ttl2bid)
@@ -157,6 +190,7 @@ def dbfy(path, db, fltr):
 
     db.commit()
 
+
 def main():
     args = create_parser().parse_args()
 
@@ -170,6 +204,7 @@ def main():
     passwd = args.passwd
     charset = args.charset
     init_path = args.init_script
+    n_processes = args.n_processes
 
     remove_html = args.remove_html
     valid_unichrs = args.valid_unichrs
@@ -179,8 +214,9 @@ def main():
     # if not check_url(url):
     #     raise ValueError("URL must be of valid format. ")
 
-    db = Database(host=host, port=port, db=dbname, user=username,
-                  password=passwd, charset=charset)
+    def db_init():
+        return Database(host=host, port=port, db=dbname, user=username,
+                        password=passwd, charset=charset)
 
     print("This will reset the database at '{}'.".format(dbname))
 
@@ -194,20 +230,22 @@ def main():
         exit(0)
 
     if os.path.exists(init_path):
-        db.execute_script(init_path)
+        db_init().execute_script(init_path)
 
-    fltr = WikiTextFilter(remove_html, valid_unichrs, invalid_unichrs)
+    def fltr_init():
+        return WikiTextFilter(remove_html, valid_unichrs, invalid_unichrs)
 
     print("Downloading Wikipedia article dump from '{}'...".format(url))
     dmp_path, should_remove = download_dump(url)
 
     print("Parsing and storing articles to mysql...")
-    dbfy(dmp_path, db, fltr)
+    dbfy(dmp_path, db_init, fltr_init, n_processes)
 
     print("Cleaning up...")
     cleanup(dmp_path, should_remove)
 
     print("Done!")
+
 
 if __name__ == '__main__':
     main()
