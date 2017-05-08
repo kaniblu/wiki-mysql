@@ -1,12 +1,16 @@
-# Wikipedia Mysql Database Storing Script
+# A Script for Storing Wikipedia Dump to MySQL DB
 
 This script creates a clean mysql database of wikipedia articles fresh from
 the wikidump repo. It can be run on both Python 2 and 3.
 
 ## Getting started
 
+Install required python packages by running
+
+    pip install -r requirements.txt
+    
 Mysql Database must be set up first. create a database and a user with relevant
-privileges on the database.
+privileges on the database. [There are many ways to achieve this](http://lmgtfy.com/?q=creating+database+and+user+in+mysql).
 
 Then simply run `dbfy.py` with relevant configurations. Details on each option
 can be seen by running `python dbfy.py --help`.
