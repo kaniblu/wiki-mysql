@@ -14,7 +14,7 @@ import gensim
 import configargparse as argparse
 
 from database import Database
-from filters import WikiTextFilter
+from filters import WikiBodyFilter
 
 
 def range_str(txt):
@@ -131,13 +131,16 @@ def _process(x):
 
     bid = db.insert("bodies", {
         "body": body
-    }, auto_column="id")
+    }, auto_column="id", ignore_errors=True)
+
+    if bid is None:
+        return None
 
     db.insert("articles", {
         "title": title,
         "body": bid,
         "aid": aid
-    }, auto_column="id")
+    }, auto_column="id", ignore_errors=True)
 
     db.commit()
 
@@ -163,6 +166,9 @@ def dbfy(path, db_init, fltr_init, n_processes):
 
         for group in tqdm.tqdm(gensim.utils.chunkize(it, 40 * n_processes)):
             for x in pool.imap(_process, group):
+                if not hasattr(x, "__len__"):
+                    continue
+
                 if len(x) == 3:
                     ttl, rdr_ttl, aid = x
                     redirects[ttl] = rdr_ttl
@@ -186,7 +192,7 @@ def dbfy(path, db_init, fltr_init, n_processes):
             "title": ttl,
             "body": bid,
             "aid": aid
-        }, auto_column="id")
+        }, auto_column="id", ignore_errors=True)
 
     db.commit()
 
@@ -233,7 +239,7 @@ def main():
         db_init().execute_script(init_path)
 
     def fltr_init():
-        return WikiTextFilter(remove_html, valid_unichrs, invalid_unichrs)
+        return WikiBodyFilter(remove_html, valid_unichrs, invalid_unichrs)
 
     print("Downloading Wikipedia article dump from '{}'...".format(url))
     dmp_path, should_remove = download_dump(url)

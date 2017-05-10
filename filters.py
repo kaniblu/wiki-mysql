@@ -9,7 +9,7 @@ import six
 import gensim
 
 
-class WikiTextFilter(object):
+class WikiBodyFilter(object):
     """Generic wikipedia article filter
 
     Strips off illegal characters and markups. Borrows some basic logic from 

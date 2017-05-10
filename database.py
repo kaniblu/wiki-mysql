@@ -54,7 +54,8 @@ class Database(object):
                 else:
                     raise e
 
-    def insert(self, table_name, column_map, auto_column=None):
+    def insert(self, table_name, column_map,
+               auto_column=None, ignore_errors=False):
         assert column_map
 
         tname = table_name
@@ -81,4 +82,13 @@ class Database(object):
             else:
                 return ret
 
-        return self.execute(_insert)
+        try:
+            return self.execute(_insert)
+        except pymysql.InternalError as e:
+            logging.warning("An internal error occurred during insertion")
+            logging.exception(e)
+
+            if ignore_errors:
+                return None
+            else:
+                raise e
