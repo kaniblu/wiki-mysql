@@ -151,8 +151,58 @@ def _process(x):
 
     return title, bid
 
+def _store_redirect(redirects, aids, articles):
+    global db, fltr
 
-def dbfy(path, db_init, fltr_init, n_processes):
+    for ttl, rdr_ttl in redirects.items():
+        bid = resolve(ttl, redirects, articles)
+
+        # Failed to resolve
+        # The page to which `ttl` redirects is probably omitted for
+        # some unknown reason.
+        # Or maybe there was recursion.
+        if bid is None:
+            continue
+
+        aid = aids[ttl]
+
+        db.insert("articles", {
+            "title": ttl,
+            "body": bid,
+            "aid": aid
+        }, auto_column="id", ignore_errors=True)
+
+    db.commit()
+
+def dbfy(path, db_init, fltr_init, *args, **kwargs):
+    global db, fltr
+
+    db = db_init()
+    fltr = fltr_init()
+    redirects = {}
+    redirects_aid = {}
+    ttl2bid = {}
+
+    with bz2.BZ2File(path, "r") as f:
+        it = gensim.corpora.wikicorpus.extract_pages(f, ("0",))
+
+        for x in tqdm.tqdm(it, desc="storing articles"):
+            x = _process(x)
+
+            if not hasattr(x, "__len__"):
+                continue
+
+            if len(x) == 3:
+                ttl, rdr_ttl, aid = x
+                redirects[ttl] = rdr_ttl
+                redirects_aid[ttl] = aid
+            elif len(x) == 2:
+                ttl, bid = x
+                ttl2bid[ttl] = bid
+
+    _store_redirect(redirects, redirects_aid, ttl2bid)
+
+def dbfy_mp(path, db_init, fltr_init, n_processes, *args, **kwargs):
     db = db_init()
     redirects = {}
     redirects_aid = {}
@@ -169,38 +219,23 @@ def dbfy(path, db_init, fltr_init, n_processes):
     with bz2.BZ2File(path, "r") as f:
         it = gensim.corpora.wikicorpus.extract_pages(f, ("0",))
 
-        for group in tqdm.tqdm(gensim.utils.chunkize(it, 40 * n_processes)):
-            for x in pool.imap(_process, group):
-                if not hasattr(x, "__len__"):
-                    continue
+        with tqdm.tqdm() as t:
+            for group in gensim.utils.chunkize(it, 40 * n_processes):
+                for x in pool.imap(_process, group):
+                    if not hasattr(x, "__len__"):
+                        continue
 
-                if len(x) == 3:
-                    ttl, rdr_ttl, aid = x
-                    redirects[ttl] = rdr_ttl
-                    redirects_aid[ttl] = aid
-                elif len(x) == 2:
-                    ttl, bid = x
-                    ttl2bid[ttl] = bid
+                    if len(x) == 3:
+                        ttl, rdr_ttl, aid = x
+                        redirects[ttl] = rdr_ttl
+                        redirects_aid[ttl] = aid
+                    elif len(x) == 2:
+                        ttl, bid = x
+                        ttl2bid[ttl] = bid
 
-    for ttl, rdr_ttl in redirects.items():
-        bid = resolve(ttl, redirects, ttl2bid)
+                t.update(len(group))
 
-        # Failed to resolve
-        # The page to which `ttl` redirects is probably omitted for
-        # some unknown reason.
-        # Or maybe there was recursion.
-        if bid is None:
-            continue
-
-        aid = redirects_aid[ttl]
-
-        db.insert("articles", {
-            "title": ttl,
-            "body": bid,
-            "aid": aid
-        }, auto_column="id", ignore_errors=True)
-
-    db.commit()
+    _store_redirect(redirects, redirects_aid, ttl2bid)
 
 
 def main():
@@ -250,8 +285,13 @@ def main():
     print("Downloading Wikipedia article dump from '{}'...".format(url))
     dmp_path, should_remove = download_dump(url)
 
+    if n_processes == 1:
+        dbfy_fn = dbfy
+    else:
+        dbfy_fn = dbfy_mp
+
     print("Parsing and storing articles to mysql...")
-    dbfy(dmp_path, db_init, fltr_init, n_processes)
+    dbfy_fn(dmp_path, db_init, fltr_init, n_processes)
 
     print("Cleaning up...")
     cleanup(dmp_path, should_remove)
