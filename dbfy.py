@@ -105,14 +105,19 @@ REDIRECT_PAT = re.compile(r"\#REDIRECT \[\[([^\]]*)\]\]")
 
 
 def resolve(ttl, redirects, ttl2bid):
-    if ttl in ttl2bid:
-        return ttl2bid[ttl]
+    def _resolve(ttl):
+        if ttl in ttl2bid:
+            return ttl2bid[ttl]
 
-    if ttl in redirects:
-        return resolve(redirects[ttl], redirects, ttl2bid)
+        if ttl in redirects:
+            return _resolve(redirects[ttl])
 
-    return None
+        return None
 
+    try:
+        return _resolve(ttl)
+    except RecursionError:
+        return None
 
 def _process(x):
     global fltr, db
@@ -183,6 +188,7 @@ def dbfy(path, db_init, fltr_init, n_processes):
         # Failed to resolve
         # The page to which `ttl` redirects is probably omitted for
         # some unknown reason.
+        # Or maybe there was recursion.
         if bid is None:
             continue
 

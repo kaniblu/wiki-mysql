@@ -11,7 +11,7 @@ CREATE TABLE `bodies` (
 CREATE TABLE `articles` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `aid` int(11) NOT NULL,
-  `title` varchar(255) NOT NULL,
+  `title` varchar(1027) NOT NULL,
   `body` int(11) NOT NULL,
   PRIMARY KEY (`id`),
   KEY `body` (`body`),
