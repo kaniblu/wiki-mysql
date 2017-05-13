@@ -2,6 +2,7 @@
 
 import time
 import logging
+import inspect
 
 import pymysql
 
@@ -86,6 +87,14 @@ class Database(object):
             return self.execute(_insert)
         except pymysql.InternalError as e:
             logging.warning("An internal error occurred during insertion")
+            logging.warning("failed insertion:")
+
+            frame = inspect.currentframe()
+            _, _, _, values = inspect.getargvalues(frame)
+
+            for param, value in values.items():
+                logging.warning("    {}={}".format(param, value))
+                
             logging.exception(e)
 
             if ignore_errors:

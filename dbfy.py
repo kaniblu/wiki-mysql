@@ -154,7 +154,7 @@ def _process(x):
 def _store_redirect(redirects, aids, articles):
     global db, fltr
 
-    for ttl, rdr_ttl in redirects.items():
+    for ttl, rdr_ttl in tqdm.tqdm(redirects.items(), desc="resolving and storing redirects"):
         bid = resolve(ttl, redirects, articles)
 
         # Failed to resolve
@@ -219,7 +219,7 @@ def dbfy_mp(path, db_init, fltr_init, n_processes, *args, **kwargs):
     with bz2.BZ2File(path, "r") as f:
         it = gensim.corpora.wikicorpus.extract_pages(f, ("0",))
 
-        with tqdm.tqdm() as t:
+        with tqdm.tqdm(desc="storing articles with multiprocessing") as t:
             for group in gensim.utils.chunkize(it, 40 * n_processes):
                 for x in pool.imap(_process, group):
                     if not hasattr(x, "__len__"):
