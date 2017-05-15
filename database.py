@@ -50,6 +50,7 @@ class Database(object):
                     logging.warning("retrying {}-th time after 1 sec..."
                                     .format(i + 1))
                     time.sleep(1)
+                    self.connect()
                     continue
                 else:
                     raise e
