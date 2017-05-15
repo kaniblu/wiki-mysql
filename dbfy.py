@@ -49,6 +49,7 @@ def create_parser():
     g.add("--passwd", required=True, type=str)
     g.add("--charset", default="utf8", type=str)
     g.add("--init_script", default="sql/init.sql", type=str)
+    g.add("--limit", default=None, type=int)
 
     g = parser.add_argument_group("Filtering Options")
     g.add("--remove_html", default=1, type=int)
@@ -174,7 +175,7 @@ def _store_redirect(redirects, aids, articles):
 
     db.commit()
 
-def dbfy(path, db_init, fltr_init, *args, **kwargs):
+def dbfy(path, db_init, fltr_init, limit, *args, **kwargs):
     global db, fltr
 
     db = db_init()
@@ -182,6 +183,7 @@ def dbfy(path, db_init, fltr_init, *args, **kwargs):
     redirects = {}
     redirects_aid = {}
     ttl2bid = {}
+    count = 0
 
     with bz2.BZ2File(path, "r") as f:
         it = gensim.corpora.wikicorpus.extract_pages(f, ("0",))
@@ -200,9 +202,14 @@ def dbfy(path, db_init, fltr_init, *args, **kwargs):
                 ttl, bid = x
                 ttl2bid[ttl] = bid
 
+            count += 1
+
+            if limit is not None and count >= limit:
+                break
+
     _store_redirect(redirects, redirects_aid, ttl2bid)
 
-def dbfy_mp(path, db_init, fltr_init, n_processes, *args, **kwargs):
+def dbfy_mp(path, db_init, fltr_init, n_processes, limit, *args, **kwargs):
     db = db_init()
     redirects = {}
     redirects_aid = {}
@@ -214,7 +221,9 @@ def dbfy_mp(path, db_init, fltr_init, n_processes, *args, **kwargs):
         db = dbi()
         fltr = fli()
 
+    _pool_init(db_init, fltr_init)
     pool = mp.Pool(n_processes, _pool_init, (db_init, fltr_init))
+    count = 0
 
     with bz2.BZ2File(path, "r") as f:
         it = gensim.corpora.wikicorpus.extract_pages(f, ("0",))
@@ -234,6 +243,10 @@ def dbfy_mp(path, db_init, fltr_init, n_processes, *args, **kwargs):
                         ttl2bid[ttl] = bid
 
                 t.update(len(group))
+                count += len(group)
+
+                if limit is not None and count >= limit:
+                    break
 
     _store_redirect(redirects, redirects_aid, ttl2bid)
 
@@ -252,6 +265,7 @@ def main():
     charset = args.charset
     init_path = args.init_script
     n_processes = args.n_processes
+    limit = args.limit
 
     remove_html = args.remove_html
     valid_unichrs = args.valid_unichrs
@@ -291,7 +305,7 @@ def main():
         dbfy_fn = dbfy_mp
 
     print("Parsing and storing articles to mysql...")
-    dbfy_fn(dmp_path, db_init, fltr_init, n_processes)
+    dbfy_fn(dmp_path, db_init, fltr_init, n_processes=n_processes, limit=limit)
 
     print("Cleaning up...")
     cleanup(dmp_path, should_remove)
